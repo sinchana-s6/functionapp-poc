@@ -1,0 +1,72 @@
+# azure-pipelines.yml
+trigger:
+  - main        # change to your branch
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # Set these in pipeline library or here
+  FUNCTION_APP_NAME: 'messagefunction-app'        # <-- replace with your Function App name
+  AZURE_SERVICE_CONNECTION: 'functionapp'  # <-- replace with your service connection name
+  PACKAGE_PATH: '$(Build.ArtifactStagingDirectory)/drop' 
+
+stages:
+- stage: Build
+  displayName: 'Build'
+  jobs:
+  - job: BuildJob
+    steps:
+    - checkout: self
+    # Example for Node/JavaScript
+    - task: NodeTool@0
+      inputs:
+        versionSpec: '18.x'
+    - script: |
+        npm install
+        npm run build   # optional: if you have a build step
+      displayName: 'npm install & build'
+    - script: |
+        mkdir -p $(Build.ArtifactStagingDirectory)
+        cp -r * $(Build.ArtifactStagingDirectory)/
+      displayName: 'Prepare artifact'
+
+    # Example for Python (uncomment + use if python project)
+    # - task: UsePythonVersion@0
+    #   inputs:
+    #     versionSpec: '3.10'
+    # - script: |
+    #     python -m pip install -r requirements.txt --target=$(Build.ArtifactStagingDirectory)
+    #   displayName: 'Install Python requirements'
+
+    - task: ArchiveFiles@2
+      inputs:
+        rootFolderOrFile: '$(Build.ArtifactStagingDirectory)'
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(Build.ArtifactStagingDirectory)/functionapp.zip'
+        replaceExistingArchive: true
+
+    - publish: '$(Build.ArtifactStagingDirectory)/functionapp.zip'
+      artifact: drop
+
+- stage: Deploy
+  displayName: 'Deploy to Azure Function'
+  dependsOn: Build
+  jobs:
+  - deployment: DeployFunction
+    displayName: 'Deploy function app'
+    environment: 'production'   # optional: pipeline environment
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: drop
+          - task: AzureFunctionApp@2
+            inputs:
+              azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
+              appType: 'functionApp'                # 'functionAppLinux' if linux
+              appName: '$(FUNCTION_APP_NAME)'
+              package: '$(Pipeline.Workspace)/drop/functionapp.zip'
+              enableCustomDeployment: false
