@@ -3,7 +3,7 @@ trigger:
   - main        # change to your branch
 
 pool:
-  vmImage: 'ubuntu-latest'
+  name: self-hosted-linux pool
 
 variables:
   # Set these in pipeline library or here
