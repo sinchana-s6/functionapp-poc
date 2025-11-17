@@ -1,72 +1,27 @@
-# azure-pipelines.yml
 trigger:
-  - main        # change to your branch
+- main
 
 pool:
   name: self-hosted-linux pool
 
-variables:
-  # Set these in pipeline library or here
-  FUNCTION_APP_NAME: 'messagefunction-app'        # <-- replace with your Function App name
-  AZURE_SERVICE_CONNECTION: 'functionapp'  # <-- replace with your service connection name
-  PACKAGE_PATH: '$(Build.ArtifactStagingDirectory)/drop' 
+steps:
+# Skip code checkout since no repo content needed
+- checkout: none
 
-stages:
-- stage: Build
-  displayName: 'Build'
-  jobs:
-  - job: BuildJob
-    steps:
-    - checkout: self
-    # Example for Node/JavaScript
-    - task: NodeTool@0
-      inputs:
-        versionSpec: '18.x'
-    - script: |
-        npm install
-        npm run build   # optional: if you have a build step
-      displayName: 'npm install & build'
-    - script: |
-        mkdir -p $(Build.ArtifactStagingDirectory)
-        cp -r * $(Build.ArtifactStagingDirectory)/
-      displayName: 'Prepare artifact'
+# Create a minimal ZIP package for deployment
+- script: |
+    mkdir -p $(Build.ArtifactStagingDirectory)
+    echo "{}" > $(Build.ArtifactStagingDirectory)/dummy.json
+    cd $(Build.ArtifactStagingDirectory)
+    zip -r functionapp.zip .
+  displayName: "Create minimal deployment package"
 
-    # Example for Python (uncomment + use if python project)
-    # - task: UsePythonVersion@0
-    #   inputs:
-    #     versionSpec: '3.10'
-    # - script: |
-    #     python -m pip install -r requirements.txt --target=$(Build.ArtifactStagingDirectory)
-    #   displayName: 'Install Python requirements'
+# Deploy to Linux Azure Function App
+- task: AzureFunctionApp@2
+  displayName: "Deploy to Azure Function App"
+  inputs:
+    azureSubscription: 'functionapp'           # service connection name
+    appType: 'functionAppLinux'                # Linux function app
+    appName: 'messagefunction-app'             # your function app name
+    package: '$(Build.ArtifactStagingDirectory)/functionapp.zip'
 
-    - task: ArchiveFiles@2
-      inputs:
-        rootFolderOrFile: '$(Build.ArtifactStagingDirectory)'
-        includeRootFolder: false
-        archiveType: 'zip'
-        archiveFile: '$(Build.ArtifactStagingDirectory)/functionapp.zip'
-        replaceExistingArchive: true
-
-    - publish: '$(Build.ArtifactStagingDirectory)/functionapp.zip'
-      artifact: drop
-
-- stage: Deploy
-  displayName: 'Deploy to Azure Function'
-  dependsOn: Build
-  jobs:
-  - deployment: DeployFunction
-    displayName: 'Deploy function app'
-    environment: 'production'   # optional: pipeline environment
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          - download: current
-            artifact: drop
-          - task: AzureFunctionApp@2
-            inputs:
-              azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
-              appType: 'functionApp'                # 'functionAppLinux' if linux
-              appName: '$(FUNCTION_APP_NAME)'
-              package: '$(Pipeline.Workspace)/drop/functionapp.zip'
-              enableCustomDeployment: false
